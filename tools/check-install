@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+if ! command -v ocamlfind >/dev/null; then
+  printf '%s\n' 'check-install requires ocamlfind: opam install ocamlfind' >&2
+  exit 1
+fi
+dune build -p rust-regex @install
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+dune install rust-regex --prefix "$work/prefix"
+export OCAMLPATH="$work/prefix/lib${OCAMLPATH:+:$OCAMLPATH}"
+export CAML_LD_LIBRARY_PATH="$work/prefix/lib/stublibs${CAML_LD_LIBRARY_PATH:+:$CAML_LD_LIBRARY_PATH}"
+cd "$work"
+cat > consumer.ml <<'OCAML'
+let () =
+  let open Rust_regex in
+  let re = compile {|(?<word>a+)|} in
+  assert (is_match re "aaa");
+  assert (Captures.expand (Option.get (captures re "aaa")) "$word" = "aaa");
+  assert (replace_all re "aaa" "x" = "x");
+  assert (Utf8.is_match (Utf8.compile {|\p{Greek}+|}) "α");
+  assert (Set_matches.indices (Set.matches (Set.compile [|"a"; "b"|]) "a") = [|0|]);
+  print_endline "installed consumer passed"
+OCAML
+ocamlfind ocamlopt -linkpkg -package rust-regex consumer.ml -o consumer.exe
+./consumer.exe
+ocamlfind ocamlc -linkpkg -package rust-regex consumer.ml -o consumer.bc
+ocamlrun consumer.bc

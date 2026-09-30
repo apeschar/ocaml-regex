@@ -1,0 +1,5 @@
+pattern	scope	payloads	bytes	positives	baseline	baseline_ms	rust_ms	speedup	baseline_alloc_bytes	rust_alloc_bytes
+attribute_capture	document	24	8949156	12	Re-capture-offsets	11.350125	0.111810	101.51	6868	1480
+assignment_capture	document	24	8949156	12	Re-capture-offsets	11.235237	0.337424	33.30	6868	1480
+multiline_log_capture	log	16	557056	12	Re-capture-offsets	0.241495	0.015885	15.20	10248	2632
+path_capture	path	71	1391	50	Re-capture-offsets	0.005012	0.020149	0.25	33552	8440

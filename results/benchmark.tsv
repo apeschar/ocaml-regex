@@ -1,0 +1,14 @@
+pattern	scope	payloads	bytes	positives	baseline	baseline_ms	rust_ms	speedup	baseline_alloc_bytes	rust_alloc_bytes
+literal_marker	document	24	8949156	12	Re	6.888730	0.106369	64.76	47	40
+caseless_literal	document	24	8949156	12	Re	6.815076	0.331776	20.54	47	40
+word_boundary	document	24	8949156	12	Re	6.857497	0.106881	64.16	47	40
+signature_alternation	document	24	8949156	12	Re	6.800856	0.554646	12.26	47	41
+attribute_capture	document	24	8949156	12	Re	6.819436	0.110193	61.89	47	40
+assignment_capture	document	24	8949156	12	Re	6.841847	0.335773	20.38	47	40
+multiline_log_capture	log	16	557056	12	Re	0.146399	0.009405	15.57	40	40
+numeric_identifier	token	11	79	3	Re	0.000176	0.000838	0.21	40	40
+path_capture	path	71	1391	50	Re	0.001669	0.006401	0.26	40	40
+path_component	path	71	1391	69	Re	0.001436	0.007322	0.20	40	40
+anchored_heading	heading	7	76	4	Re	0.000137	0.000584	0.23	40	40
+byte_marker	bytes	8	262196	4	Re	0.278178	0.005220	53.29	40	40
+atomic_group	token	11	79	2	Pcre	0.000703	NA	NA	832	NA

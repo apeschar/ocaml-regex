@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        ocaml: [4.14.x, 5.4.x]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.83.0
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ${{ matrix.ocaml }}
+      - run: opam lint rust-regex.opam
+      # Rust is supplied above; do not ask the OS package manager for another Cargo.
+      - run: opam install . --deps-only --with-test --assume-depexts -y
+      - run: opam install ocamlfind --assume-depexts -y
+      # An empty Cargo cache verifies that the source's vendor archive is sufficient.
+      - run: |
+          export CARGO_HOME="$(mktemp -d)"
+          opam exec -- dune build -p rust-regex
+          opam exec -- dune runtest -p rust-regex --force
+          opam exec -- tools/check-install
+      - run: opam install . --with-test --assume-depexts -y

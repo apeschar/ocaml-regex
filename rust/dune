@@ -1,0 +1,27 @@
+(dirs :standard \ vendor target)
+
+(rule
+ (targets libocaml_regex_rust.a dllocaml_regex_rust.so)
+ (deps Cargo.toml Cargo.lock config.toml (source_tree src) vendor.tar.gz)
+ (action
+  (no-infer
+   (progn
+    (run tar xf vendor.tar.gz)
+    (run cargo build --manifest-path Cargo.toml --locked --offline --release
+     --config config.toml
+     --config "source.crates-io.replace-with=\"vendored-sources\""
+     --config "source.vendored-sources.directory=\"vendor\"")
+    (run cp target/release/libocaml_regex_rust.a libocaml_regex_rust.a)
+    (run sh -c "if test -f target/release/libocaml_regex_rust.so; then cp target/release/libocaml_regex_rust.so dllocaml_regex_rust.so; else cp target/release/libocaml_regex_rust.dylib dllocaml_regex_rust.so; fi")))))
+
+(rule
+ (targets c_flags.sexp)
+ (action
+  (with-stdout-to c_flags.sexp
+   (run sh -c "case \"$1\" in macosx) echo '(-lpthread -lm)' ;; *) echo '(-lpthread -ldl -lm)' ;; esac" -- %{system}))))
+
+(library
+ (name rust_regex_rust)
+ (public_name rust-regex.rust)
+ (foreign_archives ocaml_regex_rust)
+ (c_library_flags (:include c_flags.sexp)))

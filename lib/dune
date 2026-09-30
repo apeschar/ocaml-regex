@@ -1,0 +1,4 @@
+(library
+ (name rust_regex)
+ (public_name rust-regex)
+ (libraries rust-regex.rust))

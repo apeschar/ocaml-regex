@@ -1,0 +1,13 @@
+literal_marker	Re		document	session-verification
+caseless_literal	Re	`CASELESS	document	javascript enabled
+word_boundary	Re		document	\brequest_token\b
+signature_alternation	Re	`CASELESS	document	assets\.example\.org|/static/assets/|data-component|client\.ready
+attribute_capture	Re		document	data-record-id\s*=\s*["']([0-9]+)["']
+assignment_capture	Re		document	\b(?:let|const)\s+recordId\s*=\s*([0-9]+)\s*;
+multiline_log_capture	Re	`MULTILINE	log	^(INFO|WARN|ERROR)\s+([0-9]{4}-[0-9]{2}-[0-9]{2})\s+(.+)$
+numeric_identifier	Re		token	\A(?:[0-9]{8}|[0-9]{12,14})\z
+path_capture	Re	`CASELESS	path	^(/(?:[a-z]{2}/)?items/([^/?#]+))/?$
+path_component	Re	`CASELESS	path	/items/
+anchored_heading	Re	`CASELESS	heading	^\s*Please wait[.!]?\s*$
+byte_marker	Re		bytes	\x00record:[0-9]+
+atomic_group	Pcre		token	\A(?>[a-z]+)[0-9]+\z

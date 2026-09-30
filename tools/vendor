@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/../rust"
+# Refresh Cargo.lock deliberately before running this script; never update it
+# implicitly while producing a release's dependency snapshot.
+cargo vendor --locked vendor >/dev/null
+# GNU tar canonical ordering/ownership/mtime and gzip without a timestamp.
+# Include dot directories: Cargo verifies them using .cargo-checksum.json.
+tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf - vendor |
+  gzip -n > vendor.tar.gz
+printf 'Updated rust/vendor.tar.gz (commit it together with Cargo.lock).\n'

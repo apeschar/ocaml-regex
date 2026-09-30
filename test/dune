@@ -1,0 +1,27 @@
+(executable
+ (name stress_domains)
+ (modules stress_domains)
+ (libraries rust-regex)
+ (enabled_if (>= %{ocaml_version} 5.0)))
+
+(rule
+ (alias runtest)
+ (enabled_if (>= %{ocaml_version} 5.0))
+ (action (run %{exe:stress_domains.exe})))
+
+(executables
+ (names test_regex)
+ (modules test_regex)
+ (libraries rust-regex)
+ (modes byte exe))
+
+(rule
+ (alias runtest)
+ (action (run %{exe:test_regex.exe})))
+
+(rule
+ (alias runtest)
+ (deps test_regex.bc)
+ (action
+  (setenv CAML_LD_LIBRARY_PATH %{workspace_root}/rust
+   (run ocamlrun %{dep:test_regex.bc}))))

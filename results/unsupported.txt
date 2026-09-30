@@ -1,0 +1,4 @@
+UNSUPPORTED atomic_group: regex parse error:
+    \A(?>[a-z]+)[0-9]+\z
+        ^
+error: unrecognized flag

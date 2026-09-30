@@ -1,0 +1,28 @@
+opam-version: "2.0"
+version: "0.1.0"
+synopsis: "OCaml bindings to Rust regex for byte and UTF-8 strings"
+description: """
+Native and bytecode bindings to the Rust regex crate: configurable builders,
+boolean and positional searches, captures, iteration, split and replacement,
+regex sets, and reusable capture locations. Byte mode supports arbitrary byte
+strings; UTF-8 mode supports Unicode. Cargo dependencies are vendored and the
+build is offline.
+"""
+maintainer: "Albert Peschar <albert@peschar.net>"
+authors: "Albert Peschar"
+license: "MIT"
+homepage: "https://github.com/apeschar/ocaml-regex"
+bug-reports: "https://github.com/apeschar/ocaml-regex/issues"
+dev-repo: "git+https://github.com/apeschar/ocaml-regex.git"
+depends: [
+  "ocaml" {>= "4.14"}
+  "dune" {>= "3.11"}
+  "conf-rust-2021" {build}
+]
+available: os != "win32"
+build: [
+  ["dune" "build" "-p" name "-j" jobs]
+]
+run-test: [
+  ["dune" "runtest" "-p" name "--force" "-j" jobs]
+]

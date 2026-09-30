@@ -1,0 +1,7 @@
+dollar-final-newline	Re=false	Rust=false
+ascii-word-boundary	Re=false	Rust=true
+latin1-case-fold	Re=false	Rust=false
+latin1-single-byte-case-fold	Re=true	Rust=unsupported-pattern
+unicode-word-boundary	Re=true	Rust=true
+ascii-whitespace	Re=true	Rust=true
+non-ascii-whitespace	Re=false	Rust=false

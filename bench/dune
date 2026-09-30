@@ -1,0 +1,4 @@
+(executables
+ (names bench semantics)
+ (libraries rust-regex re pcre unix)
+ (enabled_if (= %{profile} bench)))

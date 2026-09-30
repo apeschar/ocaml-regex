@@ -1,0 +1,17 @@
+/target/
+/rust/target/
+/rust/vendor/
+/_build*/
+/*.install
+/*.merlin
+/.release/
+/corpus/*
+!/corpus/manifest.json
+!/corpus/patterns.tsv
+!/corpus/payloads.tsv
+!/corpus/README.md
+/ocaml/
+**/*.cm[iox]
+**/*.cmxa
+**/*.o
+**/__pycache__/
