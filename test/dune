@@ -10,14 +10,25 @@
  (action (run %{exe:stress_domains.exe})))
 
 (executables
- (names test_regex)
- (modules test_regex)
+ (names test_regex memory_lifetime)
+ (modules test_regex memory_lifetime)
  (libraries rust-regex)
  (modes byte exe))
 
 (rule
  (alias runtest)
  (action (run %{exe:test_regex.exe})))
+
+(rule
+ (alias runtest)
+ (action (run %{exe:memory_lifetime.exe})))
+
+(rule
+ (alias runtest)
+ (deps memory_lifetime.bc)
+ (action
+  (setenv CAML_LD_LIBRARY_PATH %{workspace_root}/rust
+   (run ocamlrun %{dep:memory_lifetime.bc}))))
 
 (rule
  (alias runtest)

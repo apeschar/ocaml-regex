@@ -4,6 +4,9 @@ use std::sync::{
     Mutex,
 };
 
+mod memory;
+use memory::{accounted, estimate, Budget};
+
 type Range = (ocaml::Int, ocaml::Int);
 type Groups = Vec<Option<Range>>;
 fn invalid(message: &'static str) -> Error {
@@ -74,12 +77,14 @@ enum Engine {
 pub struct Compiled {
     engine: Engine,
     id: u64,
+    budget: Budget,
 }
 ocaml::custom!(Compiled);
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 // Both arms produce owned results before ocaml-rs allocates any OCaml values.
 macro_rules! search {
-    ($r:expr, $h:expr, |$re:ident, $hay:ident| $body:expr) => {
+    ($r:expr, $h:expr, |$re:ident, $hay:ident| $body:expr) => {{
+        let _memory_guard = $r.budget.enter();
         match &$r.engine {
             Engine::Bytes($re) => {
                 let $hay = $h;
@@ -90,7 +95,7 @@ macro_rules! search {
                 $body
             }
         }
-    };
+    }};
 }
 macro_rules! metadata {
     ($r:expr, |$re:ident| $body:expr) => {
@@ -122,20 +127,35 @@ pub fn rust_regex_build(
                 .map_err(|e| e.to_string())?,
         )
     };
-    Ok(Compiled {
-        engine,
-        id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
-    }
-    .into())
+    let budget = estimate(&[pattern], &options, text, false);
+    let bytes = budget.initial(false);
+    Ok(accounted(
+        Compiled {
+            engine,
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            budget,
+        },
+        bytes,
+    ))
 }
 #[ocaml::func]
 pub fn rust_regex_clone(re: &Compiled) -> ocaml::Pointer<Compiled> {
-    Compiled {
-        engine: re.engine.clone(),
-        id: re.id,
-    }
-    .into()
+    let budget = re.budget.cloned();
+    let bytes = budget.initial(true);
+    accounted(
+        Compiled {
+            engine: re.engine.clone(),
+            id: re.id,
+            budget,
+        },
+        bytes,
+    )
 }
+#[ocaml::func]
+pub fn rust_regex_cache_extra(re: &Compiled) -> ocaml::Int {
+    re.budget.extra() as ocaml::Int
+}
+
 #[ocaml::func]
 pub fn rust_regex_pattern(re: &Compiled) -> String {
     metadata!(re, |r| r.as_str().to_owned())
@@ -328,11 +348,20 @@ pub fn rust_regex_locations(re: &Compiled) -> ocaml::Pointer<CaptureLocations> {
         Engine::Bytes(r) => Locations::Bytes(r.capture_locations()),
         Engine::Utf8(r) => Locations::Utf8(r.capture_locations()),
     };
-    CaptureLocations {
-        locations: Mutex::new(locations),
-        id: re.id,
-    }
-    .into()
+    let len = match &locations {
+        Locations::Bytes(l) => l.len(),
+        Locations::Utf8(l) => l.len(),
+    };
+    let bytes = len
+        .saturating_mul(4 * std::mem::size_of::<usize>())
+        .saturating_add(128);
+    accounted(
+        CaptureLocations {
+            locations: Mutex::new(locations),
+            id: re.id,
+        },
+        bytes,
+    )
 }
 #[ocaml::func]
 pub fn rust_regex_locations_len(loc: &CaptureLocations) -> ocaml::Int {
@@ -378,6 +407,7 @@ pub fn rust_regex_captures_read(
     }
     let start = position(start, payload.len())?;
     let mut guard = loc.locations.lock().unwrap_or_else(|e| e.into_inner());
+    let _memory_guard = re.budget.enter();
     let range = match (&re.engine, &mut *guard) {
         (Engine::Bytes(r), Locations::Bytes(l)) => r
             .captures_read_at(l, payload, start)
@@ -395,7 +425,10 @@ enum SetEngine {
     Bytes(regex::bytes::RegexSet),
     Utf8(regex::RegexSet),
 }
-pub struct Set(SetEngine);
+pub struct Set {
+    engine: SetEngine,
+    budget: Budget,
+}
 ocaml::custom!(Set);
 #[ocaml::func]
 pub fn rust_regex_set_build(
@@ -409,20 +442,22 @@ pub fn rust_regex_set_build(
         .map(|s| std::str::from_utf8(&s.0))
         .collect::<Result<_, _>>()
         .map_err(|e| e.to_string())?;
-    Ok(Set(if text {
+    let engine = if text {
         SetEngine::Utf8(
-            configure!(regex::RegexSetBuilder::new(patterns), options)
+            configure!(regex::RegexSetBuilder::new(&patterns), options)
                 .build()
                 .map_err(|e| e.to_string())?,
         )
     } else {
         SetEngine::Bytes(
-            configure!(regex::bytes::RegexSetBuilder::new(patterns), options)
+            configure!(regex::bytes::RegexSetBuilder::new(&patterns), options)
                 .build()
                 .map_err(|e| e.to_string())?,
         )
-    })
-    .into())
+    };
+    let budget = estimate(&patterns, &options, text, true);
+    let bytes = budget.initial(false);
+    Ok(accounted(Set { engine, budget }, bytes))
 }
 // Own pattern bytes when converting an OCaml array, including invalid UTF-8.
 pub struct ByteStringInput(Vec<u8>);
@@ -433,11 +468,23 @@ unsafe impl ocaml::FromValue for ByteStringInput {
 }
 #[ocaml::func]
 pub fn rust_regex_set_clone(set: &Set) -> ocaml::Pointer<Set> {
-    Set(set.0.clone()).into()
+    let budget = set.budget.cloned();
+    let bytes = budget.initial(true);
+    accounted(
+        Set {
+            engine: set.engine.clone(),
+            budget,
+        },
+        bytes,
+    )
+}
+#[ocaml::func]
+pub fn rust_regex_set_cache_extra(set: &Set) -> ocaml::Int {
+    set.budget.extra() as ocaml::Int
 }
 #[ocaml::func]
 pub fn rust_regex_set_patterns(set: &Set) -> Vec<String> {
-    match &set.0 {
+    match &set.engine {
         SetEngine::Bytes(s) => s.patterns().to_vec(),
         SetEngine::Utf8(s) => s.patterns().to_vec(),
     }
@@ -449,7 +496,8 @@ pub fn rust_regex_set_is_match(
     start: ocaml::Int,
 ) -> Result<bool, Error> {
     let start = position(start, payload.len())?;
-    Ok(match &set.0 {
+    let _memory_guard = set.budget.enter();
+    Ok(match &set.engine {
         SetEngine::Bytes(s) => s.is_match_at(payload, start),
         SetEngine::Utf8(s) => s.is_match_at(utf8(payload)?, start),
     })
@@ -487,7 +535,8 @@ pub fn rust_regex_set_matches(
     start: ocaml::Int,
 ) -> Result<Vec<ocaml::Int>, Error> {
     let start = position(start, payload.len())?;
-    Ok(match &set.0 {
+    let _memory_guard = set.budget.enter();
+    Ok(match &set.engine {
         SetEngine::Bytes(s) => s
             .matches_at(payload, start)
             .iter()

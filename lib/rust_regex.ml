@@ -1,6 +1,7 @@
 type raw
 type raw_set
 type raw_locations
+type cache_charge
 type range = int * int
 
 type options = {
@@ -16,7 +17,7 @@ type options = {
   size_limit : int;
   dfa_size_limit : int;
   nest_limit : int;
-}
+} [@@warning "-69"] (* Fields are read by the native FFI decoder. *)
 
 external build_raw : string -> options -> bool -> (raw, string) result
   = "rust_regex_build"
@@ -76,6 +77,35 @@ external set_is_match_raw : raw_set -> string -> int -> bool
 external set_matches_raw : raw_set -> string -> int -> int array
   = "rust_regex_set_matches"
 
+external cache_extra_raw : raw -> int = "rust_regex_cache_extra"
+external set_cache_extra_raw : raw_set -> int = "rust_regex_set_cache_extra"
+external memory_charge_raw : int -> cache_charge = "rust_regex_memory_charge"
+
+(* Clones retain the original charged wrapper, not a second charge for its
+   shared program. Each handle has its own cache reserve/atomic growth tokens. *)
+type 'a memory = {
+  native : 'a;
+  original : 'a memory option;
+  extra : (int * cache_charge list) Atomic.t;
+}
+
+let memory ?original native =
+  { native; original; extra = Atomic.make (0, []) }
+
+let original memory = Option.value memory.original ~default:memory
+
+let rec observe_cache getter memory =
+  let old = Atomic.get memory.extra in
+  let accounted, charges = old in
+  let needed = getter memory.native in
+  if needed > accounted then (
+    let charge = memory_charge_raw (needed - accounted) in
+    if not (Atomic.compare_and_set memory.extra old (needed, charge :: charges))
+    then observe_cache getter memory)
+
+let tracked getter memory f =
+  Fun.protect ~finally:(fun () -> observe_cache getter memory) f
+
 let get_exn = function
   | Ok value -> value
   | Error message -> invalid_arg message
@@ -111,6 +141,7 @@ end
 module Captures = struct
   type t = {
     re : raw;
+    memory : raw memory;
     source : string;
     groups : range option array;
     names : string option array;
@@ -152,7 +183,8 @@ module Captures = struct
 
   let expand t replacement =
     Option.get
-      (expand_raw t.re t.source (Match.start (get_match t)) replacement)
+      (tracked cache_extra_raw t.memory (fun () ->
+           expand_raw t.re t.source (Match.start (get_match t)) replacement))
 end
 
 module Set_matches = struct
@@ -338,9 +370,12 @@ module Make (Mode : sig
   val utf8 : bool
 end) =
 struct
-  type t = { raw : raw; names : string option array; static_len : int option }
+  type t = { raw : raw; memory : raw memory; names : string option array; static_len : int option }
 
-  let wrap raw = { raw; names = names_raw raw; static_len = static_len_raw raw }
+  let wrap ?original raw =
+    { raw; memory = memory ?original raw; names = names_raw raw; static_len = static_len_raw raw }
+
+  let run re f = tracked cache_extra_raw re.memory f
 
   let compile_result ?(caseless = false) ?(multiline = false) ?(dotall = false)
       ?(unicode = Mode.utf8) ?(crlf = false) ?(line_terminator = '\n')
@@ -363,7 +398,7 @@ struct
         nest_limit;
       }
     in
-    Result.map wrap (build_raw pattern opts Mode.utf8)
+    Result.map (fun raw -> wrap raw) (build_raw pattern opts Mode.utf8)
 
   let compile ?caseless ?multiline ?dotall ?unicode ?crlf ?line_terminator
       ?swap_greed ?ignore_whitespace ?octal ?size_limit ?dfa_size_limit
@@ -373,26 +408,27 @@ struct
          ?line_terminator ?swap_greed ?ignore_whitespace ?octal ?size_limit
          ?dfa_size_limit ?nest_limit pattern)
 
-  let clone re = wrap (clone_raw re.raw)
+  let clone re = wrap ~original:(original re.memory) (clone_raw re.raw)
   let as_str re = pattern_raw re.raw
   let capture_names re = Array.copy re.names
   let captures_len re = Array.length re.names
   let static_captures_len re = re.static_len
-  let is_match_at re source pos = is_match_raw re.raw source pos
+  let is_match_at re source pos = run re (fun () -> is_match_raw re.raw source pos)
   let is_match re source = is_match_at re source 0
 
   let find_at re source pos =
-    Option.map (Match.make source) (find_raw re.raw source pos)
+    Option.map (Match.make source) (run re (fun () -> find_raw re.raw source pos))
 
   let find re source = find_at re source 0
-  let shortest_match_at re source pos = shortest_raw re.raw source pos
+  let shortest_match_at re source pos = run re (fun () -> shortest_raw re.raw source pos)
   let shortest_match re source = shortest_match_at re source 0
-  let captures_offsets_at re source pos = captures_raw re.raw source pos
+  let captures_offsets_at re source pos = run re (fun () -> captures_raw re.raw source pos)
   let captures_offsets re source = captures_offsets_at re source 0
 
   let make_captures re source groups =
     {
       Captures.re = re.raw;
+      memory = re.memory;
       source;
       groups;
       names = re.names;
@@ -405,19 +441,19 @@ struct
   let captures re source = captures_at re source 0
 
   let find_all re source =
-    Array.map (Match.make source) (find_all_raw re.raw source)
+    Array.map (Match.make source) (run re (fun () -> find_all_raw re.raw source))
 
   let find_iter re source = Array.to_seq (find_all re source)
 
   let captures_all re source =
-    Array.map (make_captures re source) (captures_all_raw re.raw source)
+    Array.map (make_captures re source) (run re (fun () -> captures_all_raw re.raw source))
 
   let captures_iter re source = Array.to_seq (captures_all re source)
-  let splitn re source limit = split_raw re.raw source limit
+  let splitn re source limit = run re (fun () -> split_raw re.raw source limit)
   let split re source = splitn re source max_int
 
   let replacen ?(literal = false) re source limit replacement =
-    replace_raw re.raw source replacement limit literal
+    run re (fun () -> replace_raw re.raw source replacement limit literal)
 
   let replace ?literal re source replacement =
     replacen ?literal re source 1 replacement
@@ -454,17 +490,21 @@ struct
     replacen_with re source 0 replacement
 
   module Capture_locations = struct
-    type t = raw_locations
+    type t = { raw : raw_locations; memory : raw memory }
 
-    let len = locations_len_raw
-    let get = locations_index_raw
-    let offsets = locations_get_raw
+    let len loc =
+      ignore (Sys.opaque_identity loc.memory);
+      locations_len_raw loc.raw
+    let get loc index = locations_index_raw loc.raw index
+    let offsets loc = locations_get_raw loc.raw
   end
 
-  let capture_locations re = locations_raw re.raw
+  let capture_locations re =
+    { Capture_locations.raw = locations_raw re.raw; memory = re.memory }
 
   let captures_read_at re loc source pos =
-    Option.map (Match.make source) (captures_read_raw re.raw loc source pos)
+    Option.map (Match.make source)
+      (run re (fun () -> captures_read_raw re.raw loc.Capture_locations.raw source pos))
 
   let captures_read re loc source = captures_read_at re loc source 0
 
@@ -510,9 +550,12 @@ struct
   end
 
   module Set = struct
-    type t = { raw : raw_set; patterns : string array }
+    type t = { raw : raw_set; memory : raw_set memory; patterns : string array }
 
-    let wrap raw = { raw; patterns = set_patterns_raw raw }
+    let wrap ?original raw =
+      { raw; memory = memory ?original raw; patterns = set_patterns_raw raw }
+
+    let run set f = tracked set_cache_extra_raw set.memory f
 
     let compile_result ?(caseless = false) ?(multiline = false)
         ?(dotall = false) ?(unicode = Mode.utf8) ?(crlf = false)
@@ -536,7 +579,7 @@ struct
           nest_limit;
         }
       in
-      Result.map wrap (set_build_raw patterns opts Mode.utf8)
+      Result.map (fun raw -> wrap raw) (set_build_raw patterns opts Mode.utf8)
 
     let compile ?caseless ?multiline ?dotall ?unicode ?crlf ?line_terminator
         ?swap_greed ?ignore_whitespace ?octal ?size_limit ?dfa_size_limit
@@ -547,16 +590,16 @@ struct
            ?dfa_size_limit ?nest_limit patterns)
 
     let empty () = compile [||]
-    let clone set = wrap (set_clone_raw set.raw)
+    let clone set = wrap ~original:(original set.memory) (set_clone_raw set.raw)
     let len set = Array.length set.patterns
     let is_empty set = len set = 0
     let patterns set = Array.copy set.patterns
-    let is_match_at set source pos = set_is_match_raw set.raw source pos
+    let is_match_at set source pos = run set (fun () -> set_is_match_raw set.raw source pos)
     let is_match set source = is_match_at set source 0
 
     let matches_at set source pos =
       {
-        Set_matches.indices = set_matches_raw set.raw source pos;
+        Set_matches.indices = run set (fun () -> set_matches_raw set.raw source pos);
         count = len set;
       }
 
